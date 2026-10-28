@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Attendance Scanner</title>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    :root { --bg: #f5f5f7; --card: #fff; --text: #222; --muted: #666; --border: #ccc;
+            --ok: #188038; --warn: #b06000; --bad: #c5221f; --accent: #1a73e8; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #121212; --card: #1e1e1e; --text: #eee; --muted: #aaa; --border: #444; }
+    }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 16px; }
+    .wrap { max-width: 480px; margin: 0 auto; }
+    h1 { font-size: 20px; margin: 0 0 12px; display: flex; justify-content: space-between; align-items: center; }
+    .card { background: var(--card); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+    label { display: block; font-size: 14px; margin: 10px 0 4px; color: var(--muted); }
+    input { width: 100%; padding: 10px; font-size: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); }
+    button { padding: 10px 14px; font-size: 16px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; }
+    button.link { background: none; color: var(--accent); padding: 4px; font-size: 14px; }
+    #reader { width: 100%; border-radius: 12px; overflow: hidden; }
+    #result { border-radius: 12px; padding: 20px; text-align: center; color: #fff; display: none; }
+    #result .big { font-size: 26px; font-weight: 700; }
+    #result .name { font-size: 20px; margin-top: 6px; }
+    #result .small { font-size: 14px; margin-top: 4px; opacity: .9; }
+    .ok { background: var(--ok); } .warn { background: var(--warn); } .bad { background: var(--bad); }
+    .row { display: flex; gap: 8px; } .row input { flex: 1; }
+    #count { font-size: 14px; color: var(--muted); }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Attendance Scanner <button class="link" onclick="toggleSettings()">Settings</button></h1>
+
+  <div class="card" id="settings" style="display:none">
+    <label for="url">Apps Script web app URL</label>
+    <input id="url" placeholder="https://script.google.com/macros/s/.../exec">
+    <label for="pin">Staff PIN</label>
+    <input id="pin" type="password">
+    <p><button onclick="saveSettings()">Save</button></p>
+  </div>
+
+  <div id="result"></div>
+  <div class="card"><div id="reader"></div></div>
+
+  <div class="card">
+    <label for="manual">Manual check-in (forgot phone): Student ID</label>
+    <div class="row">
+      <input id="manual" type="text">
+      <button onclick="manualCheckIn()">Check in</button>
+    </div>
+    <p id="count"></p>
+  </div>
+</div>
+
+<script>
+  var busy = false, lastToken = '', lastTime = 0, scansThisDevice = 0, scanner;
+
+  function store(k, v) { try { if (v === undefined) return localStorage.getItem(k) || ''; localStorage.setItem(k, v); } catch (e) { return ''; } }
+
+  function toggleSettings() {
+    var s = document.getElementById('settings');
+    s.style.display = s.style.display === 'none' ? 'block' : 'none';
+  }
+
+  function saveSettings() {
+    store('att_url', document.getElementById('url').value.trim());
+    store('att_pin', document.getElementById('pin').value);
+    toggleSettings();
+    show('ok', 'Saved', '', 'Ready to scan');
+  }
+
+  function show(cls, big, name, small) {
+    var r = document.getElementById('result');
+    r.className = cls;
+    r.style.display = 'block';
+    r.innerHTML = '<div class="big"></div><div class="name"></div><div class="small"></div>';
+    r.children[0].textContent = big;
+    r.children[1].textContent = name || '';
+    r.children[2].textContent = small || '';
+  }
+
+  function send(payload) {
+    var url = store('att_url'), pin = store('att_pin');
+    if (!url || !pin) { toggleSettings(); show('bad', 'Set up first', '', 'Enter the web app URL and staff PIN'); return Promise.resolve(); }
+    payload.pin = pin;
+    busy = true;
+    show('warn', 'Checking…', '', '');
+    // text/plain avoids a CORS preflight, which Apps Script does not support
+    return fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res.status === 'ok') {
+          scansThisDevice++;
+          document.getElementById('count').textContent = 'Checked in on this device: ' + scansThisDevice;
+          show('ok', '✓ Checked in', res.name, res.studentId + ' · ' + res.time);
+          beep(880);
+        } else if (res.status === 'duplicate') {
+          show('warn', 'Already checked in', res.name, 'at ' + res.time);
+          beep(440);
+        } else {
+          show('bad', '✗ ' + (res.message || res.status), '', '');
+          beep(220);
+        }
+      })
+      .catch(function (err) { show('bad', 'Network error', '', String(err)); })
+      .finally(function () { setTimeout(function () { busy = false; }, 1500); });
+  }
+
+  function onScan(text) {
+    var now = Date.now();
+    if (busy || (text === lastToken && now - lastTime < 5000)) return;
+    lastToken = text; lastTime = now;
+    send({ token: text });
+  }
+
+  function manualCheckIn() {
+    var el = document.getElementById('manual');
+    if (!el.value.trim()) return;
+    send({ studentId: el.value.trim() }).then(function () { el.value = ''; });
+  }
+
+  function beep(freq) {
+    try {
+      var ctx = new (window.AudioContext || window.webkitAudioContext)();
+      var o = ctx.createOscillator(); o.frequency.value = freq; o.connect(ctx.destination);
+      o.start(); o.stop(ctx.currentTime + 0.15);
+    } catch (e) {}
+  }
+
+  document.getElementById('url').value = store('att_url');
+  document.getElementById('pin').value = store('att_pin');
+  if (!store('att_url')) toggleSettings();
+
+  scanner = new Html5Qrcode('reader');
+  scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: 250 }, onScan)
+    .catch(function (err) { show('bad', 'Camera not available', '', String(err)); });
+</script>
+</body>
+</html>

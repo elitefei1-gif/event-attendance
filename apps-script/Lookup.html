@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body { font-family: system-ui, sans-serif; background: #f5f5f7; margin: 0; padding: 24px 16px; color: #222; }
+    .card { max-width: 380px; margin: 0 auto; background: #fff; border-radius: 12px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+    h1 { font-size: 20px; margin: 0 0 16px; }
+    label { display: block; font-size: 14px; margin: 12px 0 4px; }
+    input { width: 100%; box-sizing: border-box; padding: 10px; font-size: 16px; border: 1px solid #ccc; border-radius: 8px; }
+    button { width: 100%; margin-top: 16px; padding: 12px; font-size: 16px; border: 0; border-radius: 8px; background: #1a73e8; color: #fff; }
+    button:disabled { opacity: .6; }
+    #result { margin-top: 20px; text-align: center; }
+    #result img { width: 260px; height: 260px; }
+    .err { color: #c5221f; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Get my QR code</h1>
+    <label for="email">Email used to register</label>
+    <input id="email" type="email" autocomplete="email">
+    <label for="sid">Student ID</label>
+    <input id="sid" type="text">
+    <button id="go" onclick="lookup()">Show my QR code</button>
+    <div id="result"></div>
+  </div>
+  <script>
+    function lookup() {
+      var btn = document.getElementById('go');
+      var out = document.getElementById('result');
+      btn.disabled = true;
+      out.textContent = 'Looking up…';
+      google.script.run
+        .withSuccessHandler(function (res) {
+          btn.disabled = false;
+          out.innerHTML = '';
+          if (!res.ok) {
+            out.innerHTML = '<p class="err"></p>';
+            out.firstChild.textContent = res.message;
+            return;
+          }
+          var p = document.createElement('p');
+          p.textContent = res.name + ' — ' + res.event;
+          var img = document.createElement('img');
+          img.src = res.qr;
+          img.alt = 'Your QR code';
+          var hint = document.createElement('p');
+          hint.textContent = 'Take a screenshot and show it at the entrance.';
+          out.append(p, img, hint);
+        })
+        .withFailureHandler(function (err) {
+          btn.disabled = false;
+          out.innerHTML = '<p class="err"></p>';
+          out.firstChild.textContent = 'Error: ' + err.message;
+        })
+        .lookupQr(document.getElementById('email').value, document.getElementById('sid').value);
+    }
+  </script>
+</body>
+</html>
