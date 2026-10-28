@@ -66,8 +66,15 @@
   }
 
   function saveSettings() {
-    store('att_url', document.getElementById('url').value.trim());
-    store('att_pin', document.getElementById('pin').value);
+    var url = document.getElementById('url').value.trim();
+    var pin = document.getElementById('pin').value.trim();
+    if (!url || !pin) { show('bad', 'Missing URL or PIN', '', 'Fill in both fields'); return; }
+    if (!/^https:\/\/script\.google\.com\/.+\/exec$/.test(url)) {
+      show('bad', 'Check the URL', '', 'It should start with https://script.google.com/ and end with /exec');
+      return;
+    }
+    store('att_url', url);
+    store('att_pin', pin);
     toggleSettings();
     show('ok', 'Saved', '', 'Ready to scan');
   }
@@ -83,8 +90,14 @@
   }
 
   function send(payload) {
-    var url = store('att_url'), pin = store('att_pin');
-    if (!url || !pin) { toggleSettings(); show('bad', 'Set up first', '', 'Enter the web app URL and staff PIN'); return Promise.resolve(); }
+    // Read the fields directly so scanning still works if the browser blocks storage
+    var url = document.getElementById('url').value.trim();
+    var pin = document.getElementById('pin').value.trim();
+    if (!url || !pin) {
+      document.getElementById('settings').style.display = 'block';
+      show('bad', 'Set up first', '', 'Enter the web app URL and staff PIN, then tap Save');
+      return Promise.resolve();
+    }
     payload.pin = pin;
     busy = true;
     show('warn', 'Checking…', '', '');
@@ -100,12 +113,17 @@
         } else if (res.status === 'duplicate') {
           show('warn', 'Already checked in', res.name, 'at ' + res.time);
           beep(440);
+        } else if (res.status === 'bad_pin') {
+          show('bad', '✗ Wrong staff PIN', '', 'Must match the PIN in setStaffPin (run it again after editing)');
+          beep(220);
         } else {
           show('bad', '✗ ' + (res.message || res.status), '', '');
           beep(220);
         }
       })
-      .catch(function (err) { show('bad', 'Network error', '', String(err)); })
+      .catch(function (err) {
+        show('bad', 'Network error', '', 'Check the URL and that web app access is "Anyone". (' + err + ')');
+      })
       .finally(function () { setTimeout(function () { busy = false; }, 1500); });
   }
 
