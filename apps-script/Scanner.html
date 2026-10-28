@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    :root { --bg: #f5f5f7; --card: #fff; --text: #222; --muted: #666; --border: #ccc;
+            --ok: #188038; --warn: #b06000; --bad: #c5221f; --accent: #1a73e8; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #121212; --card: #1e1e1e; --text: #eee; --muted: #aaa; --border: #444; }
+    }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 16px; }
+    .wrap { max-width: 480px; margin: 0 auto; }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    .who { font-size: 13px; color: var(--muted); margin: 0 0 12px; }
+    .card { background: var(--card); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+    label.title { display: block; font-size: 14px; margin: 0 0 6px; color: var(--muted); }
+    input[type=text] { width: 100%; padding: 10px; font-size: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); }
+    button, .btn { display: inline-block; padding: 12px 16px; font-size: 16px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; text-align: center; cursor: pointer; }
+    .btn.big { display: block; width: 100%; padding: 18px; font-size: 18px; }
+    #reader { width: 100%; border-radius: 12px; overflow: hidden; }
+    #result { border-radius: 12px; padding: 20px; text-align: center; color: #fff; display: none; margin-bottom: 12px; }
+    #result .big { font-size: 26px; font-weight: 700; }
+    #result .name { font-size: 20px; margin-top: 6px; }
+    #result .small { font-size: 14px; margin-top: 4px; opacity: .9; }
+    .ok { background: var(--ok); } .warn { background: var(--warn); } .bad { background: var(--bad); }
+    .row { display: flex; gap: 8px; } .row input { flex: 1; }
+    .hint { font-size: 13px; color: var(--muted); }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Attendance Scanner</h1>
+  <p class="who"><?= eventName ?> · signed in as <?= staffEmail ?></p>
+
+  <div id="result"></div>
+
+  <div class="card">
+    <div id="reader"></div>
+    <div id="photoMode" style="display:none">
+      <label class="btn big">📷 Take photo of QR code
+        <input id="photo" type="file" accept="image/*" capture="environment" hidden>
+      </label>
+      <p class="hint">Live camera isn't available in this browser, so take a photo of the QR code instead. Hold the phone steady and fill most of the photo with the code.</p>
+    </div>
+    <div id="fileReader" style="display:none"></div>
+  </div>
+
+  <div class="card">
+    <label class="title" for="manual">Manual check-in (forgot phone): Student ID</label>
+    <div class="row">
+      <input id="manual" type="text">
+      <button onclick="manualCheckIn()">Check in</button>
+    </div>
+    <p class="hint" id="count"></p>
+  </div>
+</div>
+
+<script>
+  var busy = false, lastToken = '', lastTime = 0, scansThisDevice = 0;
+
+  function show(cls, big, name, small) {
+    var r = document.getElementById('result');
+    r.className = cls;
+    r.style.display = 'block';
+    r.innerHTML = '<div class="big"></div><div class="name"></div><div class="small"></div>';
+    r.children[0].textContent = big;
+    r.children[1].textContent = name || '';
+    r.children[2].textContent = small || '';
+    r.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function send(payload) {
+    busy = true;
+    show('warn', 'Checking…', '', '');
+    return new Promise(function (resolve) {
+      google.script.run
+        .withSuccessHandler(function (res) { handle(res); done(); })
+        .withFailureHandler(function (err) { show('bad', 'Error', '', err.message); done(); })
+        .scannerCheckIn(payload);
+      function done() { setTimeout(function () { busy = false; }, 1500); resolve(); }
+    });
+  }
+
+  function handle(res) {
+    if (res.status === 'ok') {
+      scansThisDevice++;
+      document.getElementById('count').textContent = 'Checked in on this device: ' + scansThisDevice;
+      show('ok', '✓ Checked in', res.name, res.studentId + ' · ' + res.time);
+      beep(880);
+    } else if (res.status === 'duplicate') {
+      show('warn', 'Already checked in', res.name, 'at ' + res.time);
+      beep(440);
+    } else {
+      show('bad', '✗ ' + (res.message || res.status), '', '');
+      beep(220);
+    }
+  }
+
+  function onScan(text) {
+    var now = Date.now();
+    if (busy || (text === lastToken && now - lastTime < 5000)) return;
+    lastToken = text; lastTime = now;
+    send({ token: text });
+  }
+
+  function manualCheckIn() {
+    var el = document.getElementById('manual');
+    if (!el.value.trim()) return;
+    send({ studentId: el.value.trim() }).then(function () { el.value = ''; });
+  }
+
+  function beep(freq) {
+    try {
+      var ctx = new (window.AudioContext || window.webkitAudioContext)();
+      var o = ctx.createOscillator(); o.frequency.value = freq; o.connect(ctx.destination);
+      o.start(); o.stop(ctx.currentTime + 0.15);
+    } catch (e) {}
+  }
+
+  function usePhotoMode() {
+    document.getElementById('reader').style.display = 'none';
+    document.getElementById('photoMode').style.display = 'block';
+  }
+
+  document.getElementById('photo').addEventListener('change', function (e) {
+    var file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    show('warn', 'Reading QR…', '', '');
+    new Html5Qrcode('fileReader').scanFile(file, false)
+      .then(function (text) { busy = false; onScan(text); })
+      .catch(function () { show('bad', 'No QR code found', '', 'Try again: closer, steadier, better light'); });
+  });
+
+  // Try the live camera first; Apps Script pages sometimes can't use it, so fall back to photos
+  if (typeof Html5Qrcode === 'undefined') {
+    show('bad', 'Scanner library failed to load', '', 'Check the internet connection and reload');
+  } else {
+    new Html5Qrcode('reader')
+      .start({ facingMode: 'environment' }, { fps: 10, qrbox: 250 }, onScan)
+      .catch(usePhotoMode);
+  }
+</script>
+</body>
+</html>

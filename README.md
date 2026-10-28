@@ -19,7 +19,26 @@ scanner/index.html (phone camera) ──POST──► Apps Script web app ──
 | `apps-script/Code.gs` | All server logic (tokens, email, check-in) |
 | `apps-script/Lookup.html` | "Get my QR code" page for students |
 | `apps-script/appsscript.json` | Apps Script settings (time zone, web app access) |
-| `scanner/index.html` | Staff scanning page, hosted on GitHub Pages |
+| `apps-script/Scanner.html` | Staff scanner served by Apps Script (`<web app URL>?page=scan`) — for school accounts |
+| `scanner/index.html` | Staff scanner hosted on GitHub Pages — for personal Gmail accounts |
+
+## Which scanner should I use?
+
+| Your Google account | "Who has access" options | Use |
+|---|---|---|
+| School / Workspace (e.g. `@soka-u.jp`) where **"Anyone" is not offered** | "Anyone within <school>" | **Option A: `?page=scan`** (below) |
+| Personal Gmail, or a school that allows "Anyone" | "Anyone" | Either; Option B (GitHub Pages) has the faster live camera |
+
+### Option A: school-only scanner (`?page=scan`)
+1. Paste `apps-script/Scanner.html` into Apps Script as an HTML file named **`Scanner`**.
+2. Edit the list in `setStaffEmails()` (other staff's school emails) and **Run** it. You (the owner) are always allowed.
+3. Deploy with **Who has access: Anyone within <school>** (Manage deployments → Edit → New version).
+4. Staff open `<web app URL>?page=scan` on a phone browser **signed in to their school Google account**.
+   - If the browser is signed in to several Google accounts, Apps Script may show an error. Use a browser/profile signed in only to the school account.
+5. If the live camera works, scan as normal. If Google blocks it, the page switches to **📷 Take photo of QR code**. Tap it, snap the code, and it checks in (~2–3 s per student).
+6. Students also need to be signed in to their school account to open the "Get my QR code" page. Tip: in the form's **Settings → Responses**, turn on **Restrict to users in <school>** so the recorded email is their school email.
+
+No PIN or GitHub Pages is needed for Option A.
 
 ---
 

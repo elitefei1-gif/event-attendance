@@ -7,8 +7,11 @@
  *      If the daily email quota is used up, the row is marked PENDING and
  *      sendPending() (runs hourly) sends it later.
  *   3. Students can also open the web app URL to look up their QR code.
- *   4. On event day, the scanner page POSTs the scanned token to doPost(),
- *      which records attendance in the "Attendance" sheet.
+ *   4. On event day, staff record attendance in the "Attendance" sheet with either:
+ *      - <web app URL>?page=scan (Scanner.html) — works with domain-only access
+ *        ("Anyone within <school>"); staff are checked by Google account.
+ *      - scanner/index.html on GitHub Pages, which POSTs to doPost() with a PIN —
+ *        needs web app access "Anyone".
  */
 
 // ===== EDIT THESE TO MATCH YOUR FORM =====
@@ -88,8 +91,26 @@ function sendPending() {
 
 // ---------- Web app ----------
 
-/** GET: the "Get my QR code" page for students. */
-function doGet() {
+/**
+ * GET:
+ *   <web app URL>            → "Get my QR code" page for students
+ *   <web app URL>?page=scan  → staff scanner (staff accounts only)
+ */
+function doGet(e) {
+  if (e && e.parameter && e.parameter.page === 'scan') {
+    if (!isStaff_()) {
+      return HtmlService.createHtmlOutput(
+        '<p style="font-family:sans-serif;padding:16px">This account (' +
+        escapeHtml_(Session.getActiveUser().getEmail() || 'not signed in') +
+        ') is not on the staff list. Ask the organiser to add you.</p>');
+    }
+    const t = HtmlService.createTemplateFromFile('Scanner');
+    t.staffEmail = Session.getActiveUser().getEmail();
+    t.eventName = CONFIG.EVENT_NAME;
+    return t.evaluate()
+      .setTitle(CONFIG.EVENT_NAME + ' — Scanner')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  }
   return HtmlService.createHtmlOutputFromFile('Lookup')
     .setTitle(CONFIG.EVENT_NAME + ' — My QR code')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
@@ -136,10 +157,38 @@ function doPost(e) {
   const pin = PropertiesService.getScriptProperties().getProperty('STAFF_PIN');
   if (!pin || req.pin !== pin) return json_({ status: 'bad_pin', message: 'Wrong staff PIN' });
 
+  return json_(checkInLocked_(req));
+}
+
+/** Called from Scanner.html (the in-Apps-Script scanner). Staff only. */
+function scannerCheckIn(req) {
+  if (!isStaff_()) return { status: 'not_staff', message: 'Not on the staff list' };
+  return checkInLocked_(req || {});
+}
+
+/**
+ * Staff who may use ?page=scan, besides you (the owner).
+ * Edit the list and run once. Accounts must be in the same domain (e.g. @soka-u.jp).
+ */
+function setStaffEmails() {
+  PropertiesService.getScriptProperties().setProperty('STAFF_EMAILS',
+    'staff1@soka-u.jp, staff2@soka-u.jp');
+}
+
+function isStaff_() {
+  const me = String(Session.getActiveUser().getEmail() || '').toLowerCase();
+  if (!me) return false;
+  if (me === String(Session.getEffectiveUser().getEmail()).toLowerCase()) return true;
+  const list = String(PropertiesService.getScriptProperties().getProperty('STAFF_EMAILS') || '')
+    .toLowerCase().split(/[\s,]+/).filter(String);
+  return list.indexOf(me) !== -1;
+}
+
+function checkInLocked_(req) {
   const lock = LockService.getScriptLock();
   lock.waitLock(15000);
   try {
-    return json_(checkIn_(req));
+    return checkIn_(req);
   } finally {
     lock.releaseLock();
   }
